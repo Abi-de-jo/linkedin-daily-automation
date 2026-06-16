@@ -44,6 +44,7 @@ async function api(method, path, body) {
 
 /**
  * Create a text post on the user's LinkedIn feed.
+ * Uses the Posts API (v2) — not the legacy UGC API.
  * @param {string} text - Post body
  * @param {string} [imageUrn] - Optional image URN for native photo posts
  * @returns {Promise<object>}
@@ -54,22 +55,23 @@ export async function createPost(text, imageUrn) {
 
   const body = {
     author,
-    lifecycleState: "PUBLISHED",
-    specificContent: {
-      "com.linkedin.ugc.ShareContent": {
-        shareCommentary: { text },
-        shareMediaCategory: imageUrn ? "IMAGE" : "NONE",
-      },
+    commentary: text,
+    visibility: "PUBLIC",
+    distribution: {
+      feedDistribution: "MAIN_FEED",
+      targetEntities: [],
+      thirdPartyDistributionChannels: [],
     },
-    visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+    lifecycleState: "PUBLISHED",
   };
 
   if (imageUrn) {
-    body.specificContent["com.linkedin.ugc.ShareContent"].media = [{
-      status: "READY",
-      media: imageUrn,
-      title: { text: "AI & Tech Update" },
-    }];
+    body.content = {
+      media: {
+        id: imageUrn,
+        altText: "AI & Tech Update",
+      },
+    };
   }
 
   return api("POST", "/rest/posts", body);
