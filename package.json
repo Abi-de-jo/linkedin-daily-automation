@@ -1,0 +1,10 @@
+{
+  "name": "linkedin-daily-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily LinkedIn post automation: AI news + OpenCode + tech solutions",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  }
+}

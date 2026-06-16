@@ -1,0 +1,47 @@
+name: Daily LinkedIn Post
+
+on:
+  schedule:
+    # Run every day at 8:00 AM UTC (adjust timezone offset as needed)
+    # For IST (UTC+5:30): 2:30 AM UTC = 8:00 AM IST
+    # For EST (UTC-5): 13:00 UTC = 8:00 AM EST
+    # For PST (UTC-8): 16:00 UTC = 8:00 AM PST
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    # Allow manual trigger for testing
+    inputs:
+      mode:
+        description: 'post or preview'
+        required: true
+        default: 'post'
+        type: choice
+        options:
+          - post
+          - preview
+
+jobs:
+  linkedin-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate and post to LinkedIn
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+        run: |
+          if [ "${{ github.event.inputs.mode }}" == "preview" ] || [ "${{ github.event_name }}" == "schedule" ]; then
+            node src/index.mjs post
+          else
+            node src/index.mjs ${{ github.event.inputs.mode }}
+          fi
+
+      - name: Log success
+        if: success()
+        run: echo "✅ LinkedIn post published successfully on $(date)"
