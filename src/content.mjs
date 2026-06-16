@@ -4,8 +4,26 @@
  * No API key needed — uses Hacker News Firebase API (free).
  */
 
+import { readFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ASSETS_DIR = join(__dirname, "..", "assets");
+
 const HN_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json";
 const HN_ITEM = "https://hacker-news.firebaseio.com/v0/item";
+
+// Images stored in assets/, rotated by day of week
+const IMAGES = [
+  { file: "opencode-repo.png", type: "image/png" },  // Mon
+  { file: "ai-brain.jpg",      type: "image/jpeg" },  // Tue
+  { file: "coding.jpg",        type: "image/jpeg" },  // Wed
+  { file: "opencode-repo.png", type: "image/png" },  // Thu
+  { file: "ai-brain.jpg",      type: "image/jpeg" },  // Fri
+  { file: "coding.jpg",        type: "image/jpeg" },  // Sat
+  { file: "opencode-repo.png", type: "image/png" },  // Sun
+];
 
 // Tech/AI-related keywords to filter stories
 const RELEVANT_KEYWORDS = [
@@ -196,4 +214,17 @@ export async function generateDailyPost() {
   const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
   const stories = await fetchRelevantStories(2);
   return composePost(stories, dayOfWeek);
+}
+
+/**
+ * Get today's image file path and MIME type.
+ * Returns { buffer, mimeType } for uploading to LinkedIn.
+ * Images are stored in assets/ and rotated by day of week.
+ */
+export async function getTodaysImage() {
+  const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
+  const img = IMAGES[dayOfWeek];
+  const filePath = join(ASSETS_DIR, img.file);
+  const buffer = await readFile(filePath);
+  return { buffer, mimeType: img.type };
 }
