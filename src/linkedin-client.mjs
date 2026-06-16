@@ -92,7 +92,7 @@ export async function uploadImage(imageBuffer, mimeType) {
     initializeUploadRequest: { owner: author },
   });
 
-  const uploadUrl = registerRes.value.uploadMechanism["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"].uploadUrl;
+  const uploadUrl = registerRes.value.uploadUrl;
   const imageUrn = registerRes.value.image;
 
   // Step 2: Upload binary

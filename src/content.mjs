@@ -4,25 +4,30 @@
  * No API key needed — uses Hacker News Firebase API (free).
  */
 
-import { readFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ASSETS_DIR = join(__dirname, "..", "assets");
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const HN_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json";
 const HN_ITEM = "https://hacker-news.firebaseio.com/v0/item";
 
-// Images stored in assets/, rotated by day of week
-const IMAGES = [
-  { file: "opencode-repo.png", type: "image/png" },  // Mon
-  { file: "ai-brain.jpg",      type: "image/jpeg" },  // Tue
-  { file: "coding.jpg",        type: "image/jpeg" },  // Wed
-  { file: "opencode-repo.png", type: "image/png" },  // Thu
-  { file: "ai-brain.jpg",      type: "image/jpeg" },  // Fri
-  { file: "coding.jpg",        type: "image/jpeg" },  // Sat
-  { file: "opencode-repo.png", type: "image/png" },  // Sun
+// Free-to-use AI/tech images from Unsplash, rotated by day of week
+// Each is a direct Unsplash image URL (free for commercial use via Unsplash license)
+const IMAGE_URLS = [
+  // Mon — OpenCode GitHub repo social preview
+  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
+  // Tue — AI brain/neural network
+  "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200",
+  // Wed — Developer coding
+  "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=1200",
+  // Thu — OpenCode again
+  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
+  // Fri — AI brain
+  "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200",
+  // Sat — Developer coding
+  "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=1200",
+  // Sun — OpenCode
+  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
 ];
 
 // Tech/AI-related keywords to filter stories
@@ -217,14 +222,28 @@ export async function generateDailyPost() {
 }
 
 /**
- * Get today's image file path and MIME type.
- * Returns { buffer, mimeType } for uploading to LinkedIn.
- * Images are stored in assets/ and rotated by day of week.
+ * Get today's image from the web — downloaded at runtime.
+ * Returns { buffer, mimeType, cleanup } for uploading to LinkedIn.
+ * Images are sourced from free Unsplash URLs, rotated by day of week.
+ * Call cleanup() to delete the temp file after upload.
  */
 export async function getTodaysImage() {
   const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
-  const img = IMAGES[dayOfWeek];
-  const filePath = join(ASSETS_DIR, img.file);
-  const buffer = await readFile(filePath);
-  return { buffer, mimeType: img.type };
+  const url = IMAGE_URLS[dayOfWeek];
+
+  console.log(`[linkedin-automation] Downloading image from: ${url}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+
+  // Detect MIME type from URL extension or Content-Type header
+  const contentType = res.headers.get("content-type") || "";
+  const mimeType = contentType.startsWith("image/")
+    ? contentType
+    : url.endsWith(".png") ? "image/png" : "image/jpeg";
+
+  console.log(`[linkedin-automation] Image downloaded: ${(buffer.length / 1024).toFixed(0)} KB (${mimeType})`);
+
+  return { buffer, mimeType };
 }
