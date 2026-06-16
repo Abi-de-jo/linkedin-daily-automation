@@ -17,7 +17,7 @@ async function main() {
   switch (mode) {
     case "preview": {
       // Generate and print the post without posting
-      const preview = await generateDailyPost();
+      const { post: preview } = await generateDailyPost();
       console.log("=== POST PREVIEW ===");
       console.log(preview);
       console.log("=== END ===");
@@ -26,13 +26,13 @@ async function main() {
 
     case "post":
     default: {
-      // Step 1: Generate post content
+      // Step 1: Generate post content + fetch HN stories for image matching
       console.log("[linkedin-automation] Generating daily post...");
-      const post = await generateDailyPost();
+      const { post, stories } = await generateDailyPost();
 
-      // Step 2: Get today's image and upload to LinkedIn
-      console.log("[linkedin-automation] Uploading image...");
-      const { buffer, mimeType } = await getTodaysImage();
+      // Step 2: Get today's dynamic image (topic-matched from stories/theme)
+      console.log("[linkedin-automation] Fetching topic-relevant image...");
+      const { buffer, mimeType } = await getTodaysImage(stories);
       const imageUrn = await uploadImage(buffer, mimeType);
       console.log(`[linkedin-automation] Image uploaded: ${imageUrn}`);
 

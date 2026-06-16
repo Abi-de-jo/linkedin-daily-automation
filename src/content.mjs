@@ -4,31 +4,66 @@
  * No API key needed — uses Hacker News Firebase API (free).
  */
 
-import { writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-
 const HN_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json";
 const HN_ITEM = "https://hacker-news.firebaseio.com/v0/item";
 
-// Free-to-use AI/tech images from Unsplash, rotated by day of week
-// Each is a direct Unsplash image URL (free for commercial use via Unsplash license)
-const IMAGE_URLS = [
-  // Mon — OpenCode GitHub repo social preview
-  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
-  // Tue — AI brain/neural network
-  "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200",
-  // Wed — Developer coding
-  "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=1200",
-  // Thu — OpenCode again
-  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
-  // Fri — AI brain
-  "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200",
-  // Sat — Developer coding
-  "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=1200",
-  // Sun — OpenCode
-  "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277",
-];
+// --- Dynamic Image Selection ---
+// Uses Wikipedia Commons API (free, no key needed) to find a topic-relevant image.
+// The topic is derived from the day's theme AND the top HN story.
+
+const WIKI_API = "https://en.wikipedia.org/w/api.php";
+const FALLBACK_IMAGE = "https://repository-images.githubusercontent.com/975734319/2c2c3389-c647-405c-a499-f80e4d521277";
+
+// Day themes → Wikipedia search topics (multi-fallback for better image coverage)
+// Each theme has a primary + fallback topics. The first one that returns an image wins.
+const THEME_TOPICS = {
+  0: ["Open_source", "GitHub", "Linux"],                        // Sun — open-source
+  1: ["Programming_language", "GitHub", "Cloud_computing"],     // Mon — tools
+  2: ["Debugging", "Automation", "DevOps"],                     // Tue — problems
+  3: ["Deep_learning", "Automation", "Data_science"],           // Wed — news
+  4: ["DevOps", "Automation", "Scrum_(software_development)"],  // Thu — workflow
+  5: ["Innovation", "Technology", "Alan_Turing"],               // Fri — reflection
+  6: ["Computer_science", "Deep_learning", "Python_(programming_language)"], // Sat — deep-dive
+};
+
+/**
+ * Search Wikipedia for a topic-relevant image (1200px wide, free, CC-licensed).
+ * Returns the image URL or null.
+ */
+async function searchWikipediaImage(topic) {
+  try {
+    const url = `${WIKI_API}?action=query&titles=${encodeURIComponent(topic)}&prop=pageimages&format=json&formatversion=2&pithumbsize=1200&origin=*`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const page = data.query?.pages?.[0];
+    if (page?.thumbnail?.source) {
+      // Wikipedia returns 1200px thumbnails for pithumbsize=1200
+      return page.thumbnail.source;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get a relevant topic keyword from an HN story title.
+ * Picks the most meaningful keyword (first matching tech/AI word).
+ */
+function extractTopicFromStories(stories) {
+  for (const story of stories) {
+    if (!story?.title) continue;
+    const title = story.title.toLowerCase();
+    for (const kw of RELEVANT_KEYWORDS) {
+      // Find longer keyword matches first (more specific)
+      if (title.includes(kw) && kw.length > 3) {
+        return kw.replace(/\s+/g, "_");
+      }
+    }
+  }
+  return null;
+}
 
 // Tech/AI-related keywords to filter stories
 const RELEVANT_KEYWORDS = [
@@ -213,37 +248,91 @@ function composePost(stories, dayOfWeek) {
 
 /**
  * Generate today's LinkedIn post content.
- * @returns {Promise<string>}
+ * @returns {Promise<{post: string, stories: Array}>}
+ * Returns both the post text and the stories used (needed for dynamic image selection).
  */
 export async function generateDailyPost() {
   const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
   const stories = await fetchRelevantStories(2);
-  return composePost(stories, dayOfWeek);
+  const post = composePost(stories, dayOfWeek);
+  return { post, stories };
 }
 
 /**
- * Get today's image from the web — downloaded at runtime.
- * Returns { buffer, mimeType, cleanup } for uploading to LinkedIn.
- * Images are sourced from free Unsplash URLs, rotated by day of week.
- * Call cleanup() to delete the temp file after upload.
+ * Get a topic-relevant image from Wikipedia Commons.
+ * Strategy:
+ *   1. Try extracting a keyword from the top HN story
+ *   2. Fall back to the day's theme topic
+ *   3. Ultimate fallback: OpenCode repo image
+ *
+ * @param {Array} stories - The fetched HN stories for today
+ * @returns {Promise<{buffer: Buffer, mimeType: string}>}
  */
-export async function getTodaysImage() {
-  const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon...
-  const url = IMAGE_URLS[dayOfWeek];
+export async function getTodaysImage(stories = []) {
+  const dayOfWeek = new Date().getDay();
+  let imageUrl = null;
 
-  console.log(`[linkedin-automation] Downloading image from: ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
+  // Strategy 0: Local browser-captured screenshot (set by run-daily.ps1 wrapper)
+  const localImage = process.env.LINKEDIN_IMAGE_PATH;
+  if (localImage) {
+    try {
+      const fs = await import("fs");
+      const buffer = fs.readFileSync(localImage);
+      const stats = fs.statSync(localImage);
+      // LinkedIn requires images >= 5KB; skip tiny screenshots
+      if (stats.size >= 5120) {
+        console.log(`[linkedin-automation] Tier 0 — Using local browser screenshot: ${localImage} (${(buffer.length / 1024).toFixed(0)} KB)`);
+        return { buffer, mimeType: "image/png" };
+      } else {
+        console.log(`[linkedin-automation] Tier 0 — Local image too small (${stats.size}B), skipping`);
+      }
+    } catch (err) {
+      console.log(`[linkedin-automation] Tier 0 — Could not read local image: ${err.message}`);
+    }
+  }
+
+  // Strategy 1: Use a keyword from today's best HN story
+  const storyTopic = extractTopicFromStories(stories);
+  if (storyTopic) {
+    console.log(`[linkedin-automation] Tier 1 — Searching Wikipedia for HN topic: "${storyTopic}"`);
+    imageUrl = await searchWikipediaImage(storyTopic);
+  }
+
+  // Strategy 2: Try day's theme topics (primary + fallbacks) until one returns an image
+  if (!imageUrl) {
+    const topics = THEME_TOPICS[dayOfWeek] || [];
+    for (const topic of topics) {
+      console.log(`[linkedin-automation] Tier 2 — Searching Wikipedia for theme: "${topic}"`);
+      imageUrl = await searchWikipediaImage(topic);
+      if (imageUrl) break;
+    }
+  }
+
+  // Strategy 3: Fallback to OpenCode repo image
+  if (!imageUrl) {
+    console.log(`[linkedin-automation] Tier 3 — No Wikipedia image found, using fallback`);
+    imageUrl = FALLBACK_IMAGE;
+  }
+
+  console.log(`[linkedin-automation] Downloading image from: ${imageUrl}`);
+  const res = await fetch(imageUrl);
+  if (!res.ok) {
+    // Last resort — try the fallback directly
+    console.log(`[linkedin-automation] Image download failed (${res.status}), using fallback`);
+    const fallbackRes = await fetch(FALLBACK_IMAGE);
+    if (!fallbackRes.ok) throw new Error("Failed to download any image");
+    const fbBuffer = Buffer.from(await fallbackRes.arrayBuffer());
+    const fbMime = fallbackRes.headers.get("content-type") || "image/png";
+    console.log(`[linkedin-automation] Image downloaded: ${(fbBuffer.length / 1024).toFixed(0)} KB (${fbMime})`);
+    return { buffer: fbBuffer, mimeType: fbMime };
+  }
 
   const buffer = Buffer.from(await res.arrayBuffer());
-
-  // Detect MIME type from URL extension or Content-Type header
   const contentType = res.headers.get("content-type") || "";
   const mimeType = contentType.startsWith("image/")
     ? contentType
-    : url.endsWith(".png") ? "image/png" : "image/jpeg";
+    : imageUrl.endsWith(".png") ? "image/png" : "image/jpeg";
 
   console.log(`[linkedin-automation] Image downloaded: ${(buffer.length / 1024).toFixed(0)} KB (${mimeType})`);
-
   return { buffer, mimeType };
 }
